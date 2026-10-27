@@ -1,6 +1,8 @@
 import base64, io, json, os, tempfile, unittest, zipfile
+from types import SimpleNamespace
 from unittest.mock import patch
 import app
+import export_mlflow_run
 
 def archive(entries):
     buf=io.BytesIO()
@@ -9,6 +11,18 @@ def archive(entries):
     return buf.getvalue()
 
 class InvestigatorTests(unittest.TestCase):
+    def test_mlflow_export_contains_metadata_not_artifacts(self):
+        run = SimpleNamespace(info=SimpleNamespace(run_id='id', experiment_id='1', status='FINISHED'), data=SimpleNamespace(params={'model':'mlp'}, metrics={'train_accuracy':0.9,'validation_accuracy':0.7}, tags={'mlflow.source.git.commit':'abc','private':'not-exported'}))
+        with tempfile.TemporaryDirectory() as directory:
+            path=os.path.join(directory,'run.zip')
+            export_mlflow_run.write_run_archive(run, path)
+            with zipfile.ZipFile(path) as archive:
+                self.assertEqual(archive.namelist(), ['mlflow_run.json'])
+                record=json.loads(archive.read('mlflow_run.json'))
+                self.assertEqual(record['code_version'], 'abc')
+                self.assertNotIn('private', record)
+                self.assertEqual(app.computed_findings([{'name':'run.json','content':json.dumps(record)}])[0]['gap'], 0.2)
+
     def test_zip_ignores_traversal_and_secrets(self):
         files=app.read_zip(archive({'../outside.py':'bad', '.env':'KEY=secret', 'train.py':'print(1)'}))
         self.assertEqual([f['name'] for f in files], ['train.py'])
@@ -35,6 +49,22 @@ class InvestigatorTests(unittest.TestCase):
 
     def test_query_mentions_detected_estimator(self):
         self.assertIn('randomforestclassifier', app.choose_search([{'name':'model.py','content':'RandomForestClassifier()'}]))
+
+    def test_daily_request_limits_are_shared(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'DAILY_REQUEST_LIMIT':'2','DAILY_IP_LIMIT':'1'}):
+            db=os.path.join(directory,'limits.db')
+            self.assertTrue(app.reserve_request('client-a', db))
+            self.assertFalse(app.reserve_request('client-a', db))
+            self.assertTrue(app.reserve_request('client-b', db))
+            self.assertFalse(app.reserve_request('client-c', db))
+
+    def test_findings_pair_values_only_within_same_run(self):
+        files = [{'name':'run.json','content':json.dumps({'a':{'train_accuracy':.96,'validation_accuracy':.70,'convergence_warning':True}, 'b':{'train_accuracy':.5}, 'c':{'validation_accuracy':.2}})}]
+        findings = app.computed_findings(files)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]['gap'], .26)
+        self.assertTrue(findings[0]['convergence_warning'])
+        self.assertEqual(findings[0]['path'], '$.a')
 
     def test_citation_context_and_missing_filename(self):
         audit=app.audit_citations('See `train.py` (line 2), and train.py:9. A separate line 1.', [{'name':'train.py','content':'one\ntwo'}])

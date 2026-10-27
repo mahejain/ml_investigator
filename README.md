@@ -124,6 +124,14 @@ Open [http://127.0.0.1:5000](http://127.0.0.1:5000), select **ML investigator sa
 
 This tracks the included sample results; it does not automatically track every investigation performed by the app. The local MLflow database and run files are excluded from Git.
 
+To investigate a run from an MLflow tracking store, first install MLflow, find the run ID in MLflow, and export its metadata locally:
+
+```bash
+python export_mlflow_run.py YOUR_RUN_ID --tracking-uri sqlite:///mlflow.db --output mlflow_run_export.zip
+```
+
+Open and review the ZIP before uploading it: parameters can contain secrets or private data. The ZIP includes run parameters, latest metrics, status, and the MLflow Git commit tag if present. It does not download or execute artifacts, import code, or verify that a recorded commit produced the run. The investigator still requires a supported metric or error. Use `--tracking-uri` only with a tracking store you trust.
+
 ## Evaluation
 
 Run the synthetic evaluation cases with your API keys set:
@@ -186,10 +194,12 @@ Docker operation has not yet been verified for this version. Binding to localhos
 - Retrieved documentation is treated as untrusted reference material. It describes general library behavior and is not proof of what happened in a particular run.
 - File and line checks confirm citation existence, not whether the cited text supports a claim.
 - The model can invent details, make incorrect technical claims or suggest experiments that need further scrutiny. Review its output.
-- The prototype is intended for trusted local use. It lacks authentication, rate limiting, user isolation and other production protections.
+- The prototype includes basic daily request limits and a concurrency limit, but still lacks authentication, user isolation and other production protections. It is intended for trusted local use until deployment is reviewed.
 - There is currently no verified public deployment or judge-accessible link. Add suitable access and abuse controls before exposing the server publicly.
 
 The default model ID is `nvidia/nemotron-3-super-120b-a12b`. Set `NEBIUS_MODEL` to another model ID if needed for your account.
+
+Request limits use a local SQLite database and UTC calendar days. Configure `DAILY_REQUEST_LIMIT` (default 30), `DAILY_IP_LIMIT` (default 5), `MAX_CONCURRENT_INVESTIGATIONS` (default 2), and optionally `RATE_LIMIT_DB`. These controls do not guarantee an API spending cap. Instances with separate databases do not share a limit, and a reverse proxy may cause all users to share one IP address. Public deployments require shared persistent storage, trusted proxy configuration, provider-side budget limits, and a separate security review.
 
 Nebius Sandboxes, Tavily Map/Crawl/Research, Toloka and Tendem are not integrated. Optional LangSmith tracing covers the Nemotron call; Tavily steps do not have separate traces.
 

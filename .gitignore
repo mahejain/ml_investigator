@@ -1,10 +1,12 @@
 .env
 .env.*
+!.env.example
 .venv/
 __pycache__/
 *.pyc
 
 investigations.sqlite3
+request_limits.sqlite3*
 evaluation_results/
 
 mlflow.db
@@ -12,3 +14,4 @@ mlflow.db-*
 mlruns/
 
 mlflow
+mlflow_run_export.zip
