@@ -1,0 +1,31 @@
+{
+  "run_type": "measured sample",
+  "dataset": "synthetic make_classification",
+  "config": {
+    "seed": 42,
+    "comparison": "same dataset, split, and model settings; scaling only"
+  },
+  "model_parameters": {
+    "hidden_layer_sizes": [
+      20
+    ],
+    "random_state": 42,
+    "max_iter": 200,
+    "alpha": 0.001
+  },
+  "python_version": "3.12.14",
+  "sklearn_version": "1.8.0",
+  "train_py_sha256": "69ddbc71689bd9e6bbd951336156ea2939e1027cb987c02222ad2ff216960b33",
+  "results": {
+    "baseline": {
+      "train_accuracy": 0.5022222222222222,
+      "validation_accuracy": 0.5066666666666667,
+      "convergence_warning": false
+    },
+    "scaled": {
+      "train_accuracy": 0.8911111111111111,
+      "validation_accuracy": 0.84,
+      "convergence_warning": true
+    }
+  }
+}

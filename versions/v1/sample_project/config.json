@@ -1,0 +1,1 @@
+{"model": "MLPClassifier", "hidden_layer_sizes": [100, 100], "scaler": "none", "random_state": 42, "run_commit": "unknown"}

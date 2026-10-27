@@ -1,0 +1,3 @@
+Example metrics for a fictional demonstration run (not measured by this app).
+train_accuracy: 0.96
+validation_accuracy: 0.71

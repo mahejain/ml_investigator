@@ -1,0 +1,14 @@
+.env
+.env.*
+.venv/
+__pycache__/
+*.pyc
+
+investigations.sqlite3
+evaluation_results/
+
+mlflow.db
+mlflow.db-*
+mlruns/
+
+mlflow
