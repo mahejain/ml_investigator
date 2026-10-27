@@ -70,6 +70,12 @@ class InvestigatorTests(unittest.TestCase):
         audit=app.audit_citations('See `train.py` (line 2), and train.py:9. A separate line 1.', [{'name':'train.py','content':'one\ntwo'}])
         self.assertEqual([(x['reference'], x['exists']) for x in audit['references']], [('train.py:2', True), ('train.py:9', False)])
 
+    def test_citation_filename_then_parenthesized_lines(self):
+        files = [{'name':'run.json','content':'first\nsecond\nthird'}]
+        audit = app.audit_citations('See `run.json` (lines 2–3).', files, {('run.json',2), ('run.json',3)})
+        self.assertEqual(audit['references'][0]['reference'], 'run.json:2-3')
+        self.assertTrue(audit['references'][0]['presented'])
+
     def test_model_truncation_is_reported(self):
         files=[{'name':'run.log','content':'train_accuracy: 0.8'}]
         with patch.dict(os.environ, {'NEBIUS_API_KEY':'dummy'}, clear=True), patch.object(app,'call_model',return_value={'choices':[{'finish_reason':'length','message':{'content':'An incomplete answer'}}]}):
@@ -96,6 +102,7 @@ class InvestigatorTests(unittest.TestCase):
         self.assertTrue(result['citation_audit']['references'][0]['exists'])
         self.assertEqual(len(result['sources']),1)
         self.assertIn('Official documentation text',post.call_args_list[2].args[1]['messages'][1]['content'])
+        self.assertIn('Repeat the filename for every observation', post.call_args_list[2].args[1]['messages'][1]['content'])
         self.assertIn('MLPClassifier',post.call_args_list[0].args[1]['query'])
 
     def test_tavily_failure_does_not_hide_investigation(self):

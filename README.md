@@ -13,6 +13,7 @@ This is a local prototype for assisting investigation. Its answers can be wrong 
 - Retrieves relevant scikit-learn documentation using Tavily.
 - Sends the evidence and retrieved references to a Nemotron model for analysis.
 - Checks whether cited file lines exist and were included in the evidence sent to the model. This does **not** guarantee that a claim is supported.
+- Requests a filename and line number for each observation; citations using other formats may not be detected and must be reviewed manually.
 - Asks for more evidence when it cannot detect a supported metric or error.
 - Does **not** execute uploaded code or extract the ZIP to disk.
 
