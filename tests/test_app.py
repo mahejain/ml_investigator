@@ -11,6 +11,20 @@ def archive(entries):
     return buf.getvalue()
 
 class InvestigatorTests(unittest.TestCase):
+    def test_likely_secret_blocks_network_calls(self):
+        files = [{'name':'run.log','content':'validation_accuracy: 0.8\napi_key = "' + ('a' * 24) + '"'}]
+        with patch.dict(os.environ, {'NEBIUS_API_KEY':'dummy','TAVILY_API_KEY':'dummy'}, clear=True), patch.object(app,'post') as post:
+            with self.assertRaisesRegex(ValueError, 'Possible credential detected'):
+                app.investigate(files, 'Why?')
+        post.assert_not_called()
+
+    def test_placeholder_is_not_treated_as_credential(self):
+        self.assertFalse(app.contains_possible_secret('api_key = "replace_with_your_api_key_here"'))
+        self.assertFalse(app.contains_possible_secret('key = os.environ.get("NEBIUS_API_KEY")'))
+
+    def test_possible_secret_in_question_is_blocked(self):
+        with self.assertRaisesRegex(ValueError, 'Possible credential detected'):
+            app.check_for_possible_secrets([], 'token: sk-' + ('a' * 25))
     def test_mlflow_export_contains_metadata_not_artifacts(self):
         run = SimpleNamespace(info=SimpleNamespace(run_id='id', experiment_id='1', status='FINISHED'), data=SimpleNamespace(params={'model':'mlp'}, metrics={'train_accuracy':0.9,'validation_accuracy':0.7}, tags={'mlflow.source.git.commit':'abc','private':'not-exported'}))
         with tempfile.TemporaryDirectory() as directory:
@@ -76,6 +90,12 @@ class InvestigatorTests(unittest.TestCase):
         self.assertEqual(audit['references'][0]['reference'], 'run.json:2-3')
         self.assertTrue(audit['references'][0]['presented'])
 
+    def test_citation_separate_comma_separated_lines(self):
+        files = [{'name':'run.json','content':'\n'.join(str(i) for i in range(1, 29))}]
+        audit = app.audit_citations('(run.json:23, 28)', files, {('run.json', 23)})
+        self.assertEqual([x['reference'] for x in audit['references']], ['run.json:23', 'run.json:28'])
+        self.assertEqual([x['presented'] for x in audit['references']], [True, False])
+
     def test_model_truncation_is_reported(self):
         files=[{'name':'run.log','content':'train_accuracy: 0.8'}]
         with patch.dict(os.environ, {'NEBIUS_API_KEY':'dummy'}, clear=True), patch.object(app,'call_model',return_value={'choices':[{'finish_reason':'length','message':{'content':'An incomplete answer'}}]}):
@@ -103,6 +123,7 @@ class InvestigatorTests(unittest.TestCase):
         self.assertEqual(len(result['sources']),1)
         self.assertIn('Official documentation text',post.call_args_list[2].args[1]['messages'][1]['content'])
         self.assertIn('Repeat the filename for every observation', post.call_args_list[2].args[1]['messages'][1]['content'])
+        self.assertIn('not proof of a unique cause', post.call_args_list[2].args[1]['messages'][1]['content'])
         self.assertIn('MLPClassifier',post.call_args_list[0].args[1]['query'])
 
     def test_tavily_failure_does_not_hide_investigation(self):

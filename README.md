@@ -190,6 +190,7 @@ Docker operation has not yet been verified for this version. Binding to localhos
 ## Privacy, limitations and deployment
 
 - The model receives text from the uploaded project. Do not upload secrets or sensitive data.
+- A limited credential-pattern check blocks some suspected secrets before model and Tavily requests. It can miss credentials and can produce false positives; it is not a substitute for reviewing files and the question before upload.
 - Tavily receives a documentation query selected from detected code, followed by an extraction request for a documentation URL. The uploaded code is not sent as the Tavily query.
 - Only results from `scikit-learn.org` are accepted. If extraction fails, the app uses search snippets where available.
 - Retrieved documentation is treated as untrusted reference material. It describes general library behavior and is not proof of what happened in a particular run.

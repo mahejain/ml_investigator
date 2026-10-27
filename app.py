@@ -67,6 +67,23 @@ def metrics(files):
 
     return found[:35]
 
+def contains_possible_secret(text):
+    """Detect a small set of likely hard-coded credentials without returning them."""
+    if re.search(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----', text):
+        return True
+    if re.search(r'\b(?:sk-[A-Za-z0-9_-]{20,}|tvly-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,})\b', text):
+        return True
+    pattern = r'''(?i)\b(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*["']([^"'\n]{20,})["']'''
+    for match in re.finditer(pattern, text):
+        value = match.group(1).lower()
+        if not any(marker in value for marker in ('example', 'placeholder', 'your_', 'your-', 'replace_', 'replace-')):
+            return True
+    return False
+
+def check_for_possible_secrets(files, question):
+    if contains_possible_secret(question) or any(contains_possible_secret(f['content']) for f in files):
+        raise ValueError('Possible credential detected in the uploaded text or question. Remove it before submitting. Detection is incomplete; review all files yourself.')
+
 def post(url, body, key):
     req = urllib.request.Request(url, json.dumps(body).encode(), {'Content-Type':'application/json', 'Authorization':'Bearer '+key})
     with urllib.request.urlopen(req, timeout=60) as res: return json.load(res)
@@ -86,14 +103,16 @@ def choose_search(files):
 def audit_citations(answer, files, presented=None):
     lengths = {f['name']: len(f['content'].splitlines()) for f in files}
     pattern = (r'(?<![\w/])([\w./-]+\.(?:py|json|log|txt|csv|ya?ml|md))'
-               r'`?(?:\s*:\s*|\s*[,)]?\s*\(?\s*lines?\s+)(\d+)(?:\s*[-–—‑]\s*(\d+))?')
+               r'`?(?:\s*:\s*|\s*[,)]?\s*\(?\s*lines?\s+)(\d+(?:\s*[-–—‑]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–—‑]\s*\d+)?)*)')
     checks = []
-    for name, first, last in re.findall(pattern, answer, re.I):
-        start = int(first); end = int(last) if last else start
-        label = f'{name}:{start}' + (f'-{end}' if last else '')
-        exists = name in lengths and 1 <= start <= end <= lengths[name]
-        sent = exists and (presented is None or all((name, n) in presented for n in range(start, end + 1)))
-        checks.append({'reference':label, 'exists':exists, 'presented':sent})
+    for name, references in re.findall(pattern, answer, re.I):
+        for reference in references.split(','):
+            bounds = re.split(r'\s*[-–—‑]\s*', reference.strip())
+            start = int(bounds[0]); end = int(bounds[1]) if len(bounds) == 2 else start
+            label = f'{name}:{start}' + (f'-{end}' if len(bounds) == 2 else '')
+            exists = name in lengths and 1 <= start <= end <= lengths[name]
+            sent = exists and (presented is None or all((name, n) in presented for n in range(start, end + 1)))
+            checks.append({'reference':label, 'exists':exists, 'presented':sent})
     return {'references':checks, 'note':'Checks whether cited lines were sent to the model, not whether they support the claim.'}
 
 def build_evidence(files, limit=100000):
@@ -182,6 +201,7 @@ def call_model(prompt, key):
     return _call_model(prompt, key)
 
 def investigate(files, question):
+    check_for_possible_secrets(files, question)
     key = os.environ.get('NEBIUS_API_KEY')
     if not key: raise ValueError('NEBIUS_API_KEY is not set. See the README.')
     refs = metrics(files)
@@ -210,6 +230,7 @@ def investigate(files, question):
       'Separate observations from hypotheses. End each factual observation with a citation formatted exactly as (filename:line) or (filename:first-last), such as (run.json:21-22). Repeat the filename for every observation; do not use a standalone line number. Do not invent citations or results. A config or comment states an intent, not proof of execution. '
       'Keep your complete answer concise, around 400 words. Use filename:line for each citation, for example run.json:21. Avoid tables. '
       'Do not infer library defaults were used in the run; do not claim an unfitted estimator can predict. A small train-validation gap alone does not rule out underfitting. Explain uncertainty and do not assume the files produced the run. Propose one controlled experiment, changing one thing, and how to interpret possible outcomes. '
+      'Describe outcomes as evidence for or against hypotheses, not proof of a unique cause; include at least one plausible alternative explanation and identify additional evidence needed. A convergence warning does not itself prove overfitting, a cause for a validation gap, or poor feature scaling. If increasing an iteration limit is proposed, explain that it may have no effect if training already stops early. Do not claim an experiment has been run. '
       'For error logs, do not assume the library or data source unless stated. '
       'If a NaN error recurs after a fix, the fix may be incomplete; do not infer NaNs are absent. '
       'Some estimators support NaNs. Distinguish supported observations from hypotheses. '
