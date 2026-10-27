@@ -1,6 +1,13 @@
 .env
+.env.*
 .venv
 __pycache__
 *.pyc
 .git
 investigations.sqlite3
+request_limits.sqlite3*
+mlflow.db*
+mlruns/
+evaluation_results/
+mlflow_run_export.zip
+sample_probe_results.json

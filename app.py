@@ -101,7 +101,8 @@ def choose_search(files):
     return "site:scikit-learn.org classification model evaluation common pitfalls"
 
 def audit_citations(answer, files, presented=None):
-    lengths = {f['name']: len(f['content'].splitlines()) for f in files}
+    lines_by_name = {f['name']: f['content'].splitlines() for f in files}
+    lengths = {name: len(lines) for name, lines in lines_by_name.items()}
     pattern = (r'(?<![\w/])([\w./-]+\.(?:py|json|log|txt|csv|ya?ml|md))'
                r'`?(?:\s*:\s*|\s*[,)]?\s*\(?\s*lines?\s+)(\d+(?:\s*[-–—‑]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–—‑]\s*\d+)?)*)')
     checks = []
@@ -112,8 +113,9 @@ def audit_citations(answer, files, presented=None):
             label = f'{name}:{start}' + (f'-{end}' if len(bounds) == 2 else '')
             exists = name in lengths and 1 <= start <= end <= lengths[name]
             sent = exists and (presented is None or all((name, n) in presented for n in range(start, end + 1)))
-            checks.append({'reference':label, 'exists':exists, 'presented':sent})
-    return {'references':checks, 'note':'Checks whether cited lines were sent to the model, not whether they support the claim.'}
+            structural_only = exists and all(not re.search(r'[\w]', line, re.UNICODE) for line in lines_by_name[name][start-1:end])
+            checks.append({'reference':label, 'exists':exists, 'presented':sent, 'structural_only':structural_only})
+    return {'references':checks, 'note':'Checks whether cited lines were sent to the model and flags blank or punctuation-only citations. It does not establish whether a citation supports a claim.'}
 
 def build_evidence(files, limit=100000):
     """Include complete lines only, and retain their exact locations for auditing."""

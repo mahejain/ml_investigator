@@ -12,7 +12,7 @@ This is a local prototype for assisting investigation. Its answers can be wrong 
 - Detects available metrics and errors and provides file and line references.
 - Retrieves relevant scikit-learn documentation using Tavily.
 - Sends the evidence and retrieved references to a Nemotron model for analysis.
-- Checks whether cited file lines exist and were included in the evidence sent to the model. This does **not** guarantee that a claim is supported.
+- Checks whether cited file lines exist and were included in the evidence sent to the model, and flags citations containing only blank or punctuation-only lines. This does **not** verify whether a claim is supported.
 - Requests a filename and line number for each observation; citations using other formats may not be detected and must be reviewed manually.
 - Asks for more evidence when it cannot detect a supported metric or error.
 - Does **not** execute uploaded code or extract the ZIP to disk.
@@ -104,6 +104,10 @@ python sample_project/train.py
 Then recreate `sample_project.zip` from the three files inside `sample_project/` before uploading it to the app.
 
 The sample run record includes seeds, library versions, model parameters, metrics, convergence warnings and a SHA-256 hash of the script. The hash identifies the recorded code; it does not independently prove that the record is genuine. Results may vary across library versions or platforms.
+
+### Run the trusted sample probe
+
+To rerun a controlled comparison on generated data without executing any uploaded code, run `python sample_probe.py`. The script saves a new `sample_probe_results.json`; it refuses to overwrite an existing file. Use `--seed 7 --output probe_seed_7.json` to run another seed. This is a local experiment on the project's own synthetic dataset, not a diagnosis or execution of an uploaded project.
 
 ## Experiment tracking with MLflow
 

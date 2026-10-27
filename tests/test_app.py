@@ -1,4 +1,4 @@
-import base64, io, json, os, tempfile, unittest, zipfile
+import base64, io, json, os, tempfile, unittest, zipfile, threading, urllib.request, urllib.error
 from types import SimpleNamespace
 from unittest.mock import patch
 import app
@@ -11,6 +11,27 @@ def archive(entries):
     return buf.getvalue()
 
 class InvestigatorTests(unittest.TestCase):
+    def test_http_sample_and_daily_cap(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'NEBIUS_API_KEY':'dummy','RATE_LIMIT_DB':os.path.join(directory,'limits.db'),'DAILY_REQUEST_LIMIT':'1','DAILY_IP_LIMIT':'1'}, clear=True), patch.object(app, 'call_model', return_value={'choices':[{'message':{'content':'Observation (run.log:1)'}}]}):
+            server = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                base = f'http://127.0.0.1:{server.server_port}'
+                with urllib.request.urlopen(base + '/sample_project.zip') as response:
+                    self.assertEqual(response.headers.get_content_type(), 'application/zip')
+                body = json.dumps({'zip':base64.b64encode(archive({'run.log':'validation_accuracy: 0.8'})).decode(), 'question':'Why?'}).encode()
+                request = lambda: urllib.request.Request(base+'/investigate', body, {'Content-Type':'application/json'})
+                with urllib.request.urlopen(request()) as response:
+                    self.assertEqual(json.load(response)['answer'], 'Observation (run.log:1)')
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(request())
+                self.assertEqual(error.exception.code, 429)
+            finally:
+                server.shutdown()
+                worker.join()
+                server.server_close()
+
     def test_likely_secret_blocks_network_calls(self):
         files = [{'name':'run.log','content':'validation_accuracy: 0.8\napi_key = "' + ('a' * 24) + '"'}]
         with patch.dict(os.environ, {'NEBIUS_API_KEY':'dummy','TAVILY_API_KEY':'dummy'}, clear=True), patch.object(app,'post') as post:
@@ -95,6 +116,12 @@ class InvestigatorTests(unittest.TestCase):
         audit = app.audit_citations('(run.json:23, 28)', files, {('run.json', 23)})
         self.assertEqual([x['reference'] for x in audit['references']], ['run.json:23', 'run.json:28'])
         self.assertEqual([x['presented'] for x in audit['references']], [True, False])
+
+    def test_structural_only_citations_are_flagged(self):
+        files = [{'name':'run.json','content':'{\n  "convergence_warning": true\n  }\n'}]
+        audit = app.audit_citations('run.json:3 and run.json:1-2', files, {('run.json', n) for n in (1, 2, 3)})
+        self.assertTrue(audit['references'][0]['structural_only'])
+        self.assertFalse(audit['references'][1]['structural_only'])
 
     def test_model_truncation_is_reported(self):
         files=[{'name':'run.log','content':'train_accuracy: 0.8'}]
