@@ -159,6 +159,7 @@
                     investigate?</label><textarea
                     id="question">Why does my MLP perform poorly on validation data?</textarea><button
                     id="go">Investigate project →</button>
+                <button type="button" id="sample">Load included sample</button>
                 <p id="error" role="alert"></p>
             </section>
             <section class="card">
@@ -180,7 +181,7 @@
             <p id="incomplete" role="alert"></p>
             <div id="answer"></div>
             <h3>Citation checks</h3>
-            <p class="note">Checks whether referenced lines exist, not whether they support the claim.</p>
+            <p class="note">Checks whether referenced lines were sent to the model, not whether they support the claim.</p>
             <ul id="audit"></ul>
             <h3>Metric lines found</h3>
             <ul id="metrics"></ul>
@@ -190,9 +191,20 @@
         </section>
     </main>
     <script>
-        const $ = id => document.getElementById(id); function renderAnswer(text) { const box = $('answer'); box.replaceChildren(); for (const line of text.split('\n')) { const p = document.createElement('p'); p.style.margin = '8px 0'; let value = line.replace(/^#{1,6}\s*/, '').replace(/^\s*[-*]\s+/, '• '); const chunks = value.split(/(\*\*[^*]+\*\*)/g); for (const chunk of chunks) { if (chunk.startsWith('**') && chunk.endsWith('**')) { const b = document.createElement('strong'); b.textContent = chunk.slice(2, -2); p.appendChild(b) } else p.appendChild(document.createTextNode(chunk)) } box.appendChild(p) } } $('go').onclick = async () => {
+        const $ = id => document.getElementById(id);
+        $('sample').onclick = async () => {
+            try {
+                const response = await fetch('/sample_project.zip');
+                if (!response.ok) throw Error('Could not load the sample.');
+                const transfer = new DataTransfer();
+                transfer.items.add(new File([await response.blob()], 'sample_project.zip', {type:'application/zip'}));
+                $('zip').files = transfer.files;
+                $('error').textContent = 'Sample loaded. Select Investigate project to run it.';
+            } catch (e) { $('error').textContent = e.message; }
+        };
+        function renderAnswer(text) { const box = $('answer'); box.replaceChildren(); let code = null; for(const line of text.split('\n')) { if (/^\s*```/.test(line)) { if(code) { box.appendChild(code); code=null; } else { code=document.createElement('pre'); } continue; } if(code) { code.textContent += line + '\n'; continue; } const p = document.createElement('p'); p.style.margin = '8px 0'; let value = line.replace(/^#{1,6}\s*/, '').replace(/^\s*[-*]\s+/, '• '); const chunks = value.split(/(\*\*[^*]+\*\*)/g); for (const chunk of chunks) { if (chunk.startsWith('**') && chunk.endsWith('**')) { const b = document.createElement('strong'); b.textContent = chunk.slice(2, -2); p.appendChild(b) } else p.appendChild(document.createTextNode(chunk)) } box.appendChild(p) } if(code) box.appendChild(code); } $('go').onclick = async () => {
             const f = $('zip').files[0]; $('error').textContent = ''; if (!f) { $('error').textContent = 'Choose a ZIP file first.'; return } if (f.size > 3000000) { $('error').textContent = 'Please choose a ZIP under 3 MB.'; return } const button = $('go'); button.disabled = true; button.textContent = 'Investigating…'; try {
-                const bytes = new Uint8Array(await f.arrayBuffer()); let s = ''; for (let i = 0; i < bytes.length; i += 8192)s += String.fromCharCode(...bytes.slice(i, i + 8192)); const res = await fetch('/investigate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zip: btoa(s), question: $('question').value }) }); const d = await res.json(); if (!res.ok) throw Error(d.error); $('result').style.display = 'block'; $('status').textContent = 'Files inspected: ' + d.files.join(', ') + (d.model ? ' • Model: ' + d.model : ''); $('incomplete').textContent = d.incomplete ? 'This response was cut off by the model. Treat it as incomplete; try a more specific question.' : ''; renderAnswer(d.answer); const au = $('audit'); au.replaceChildren(); for (const c of d.citation_audit.references) { const li = document.createElement('li'); li.textContent = (c.exists ? 'Found: ' : 'Not found: ') + c.reference; au.appendChild(li) } if (!d.citation_audit.references.length) au.textContent = 'No filename:line citations found; check the response manually.'; const m = $('metrics'); m.replaceChildren(); for (const v of d.metrics) { const li = document.createElement('li'); li.textContent = v.source + ' — ' + v.text; m.appendChild(li) } if (!d.metrics.length) m.textContent = 'No matching metric lines were found.'; $('warning').textContent = d.warning || ''; const src = $('sources'); src.replaceChildren(); for (const v of d.sources) {
+                const bytes = new Uint8Array(await f.arrayBuffer()); let s = ''; for (let i = 0; i < bytes.length; i += 8192)s += String.fromCharCode(...bytes.slice(i, i + 8192)); const res = await fetch('/investigate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zip: btoa(s), question: $('question').value }) }); const d = await res.json(); if (!res.ok) throw Error(d.error); $('result').style.display = 'block'; $('status').textContent = 'Files inspected: ' + d.files.join(', ') + (d.model ? ' • Model: ' + d.model : ''); $('incomplete').textContent = d.incomplete ? 'This response was cut off by the model. Treat it as incomplete; try a more specific question.' : ''; renderAnswer(d.answer); const au = $('audit'); au.replaceChildren(); for (const c of d.citation_audit.references) { const li = document.createElement('li'); li.textContent = (c.presented ? 'Sent to model: ' : (c.exists ? 'Not sent to model: ' : 'Not found: ')) + c.reference; au.appendChild(li) } if (!d.citation_audit.references.length) au.textContent = 'No filename:line citations found; check the response manually.'; const m = $('metrics'); m.replaceChildren(); for (const v of d.metrics) { const li = document.createElement('li'); li.textContent = v.source + ' — ' + v.text; m.appendChild(li) } if (!d.metrics.length) m.textContent = 'No matching metric lines were found.'; $('warning').textContent = d.warning || ''; const src = $('sources'); src.replaceChildren(); for (const v of d.sources) {
                     try {
                         const u = new URL(v.url); if (!['http:', 'https:'].includes(u.protocol)) continue; const li = document.createElement('li'), a = document.createElement('a'); a.href = u.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = v.title; li.append(
                             a,

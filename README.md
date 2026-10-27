@@ -12,7 +12,7 @@ This is a local prototype for assisting investigation. Its answers can be wrong 
 - Detects available metrics and errors and provides file and line references.
 - Retrieves relevant scikit-learn documentation using Tavily.
 - Sends the evidence and retrieved references to a Nemotron model for analysis.
-- Checks whether cited file lines exist. A valid citation does **not** guarantee that a claim is supported.
+- Checks whether cited file lines exist and were included in the evidence sent to the model. This does **not** guarantee that a claim is supported.
 - Asks for more evidence when it cannot detect a supported metric or error.
 - Does **not** execute uploaded code or extract the ZIP to disk.
 
@@ -59,6 +59,7 @@ python app.py
 ```
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000) and upload `sample_project.zip`.
+Alternatively, choose **Load included sample**, then select **Investigate project**.
 
 If PowerShell blocks virtual-environment activation, you can use the virtual environment's Python directly:
 
@@ -106,6 +107,8 @@ The sample run record includes seeds, library versions, model parameters, metric
 ## Experiment tracking with MLflow
 
 The project includes `track_mlflow.py` to import the existing sample experiment results into MLflow:
+
+Install the optional MLflow dependency first with `python -m pip install mlflow`.
 
 ```bash
 python track_mlflow.py
@@ -178,7 +181,7 @@ Docker operation has not yet been verified for this version. Binding to localhos
 ## Privacy, limitations and deployment
 
 - The model receives text from the uploaded project. Do not upload secrets or sensitive data.
-- Tavily receives a predefined documentation query selected from detected code, followed by an extraction request for a documentation URL. The uploaded code is not sent as the Tavily query.
+- Tavily receives a documentation query selected from detected code, followed by an extraction request for a documentation URL. The uploaded code is not sent as the Tavily query.
 - Only results from `scikit-learn.org` are accepted. If extraction fails, the app uses search snippets where available.
 - Retrieved documentation is treated as untrusted reference material. It describes general library behavior and is not proof of what happened in a particular run.
 - File and line checks confirm citation existence, not whether the cited text supports a claim.

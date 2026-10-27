@@ -25,6 +25,17 @@ class InvestigatorTests(unittest.TestCase):
         audit=app.audit_citations('Evidence: train.py:2; also train.py:9.', [{'name':'train.py','content':'one\ntwo'}])
         self.assertEqual([x['exists'] for x in audit['references']], [True, False])
 
+    def test_citations_outside_presented_evidence(self):
+        files = [{'name':'run.log','content':'first\nsecond\nthird'}]
+        evidence, presented = app.build_evidence(files, limit=30)
+        audit = app.audit_citations('run.log:1 and run.log:3', files, presented)
+        self.assertTrue(audit['references'][0]['presented'])
+        self.assertTrue(audit['references'][1]['exists'])
+        self.assertFalse(audit['references'][1]['presented'])
+
+    def test_query_mentions_detected_estimator(self):
+        self.assertIn('randomforestclassifier', app.choose_search([{'name':'model.py','content':'RandomForestClassifier()'}]))
+
     def test_citation_context_and_missing_filename(self):
         audit=app.audit_citations('See `train.py` (line 2), and train.py:9. A separate line 1.', [{'name':'train.py','content':'one\ntwo'}])
         self.assertEqual([(x['reference'], x['exists']) for x in audit['references']], [('train.py:2', True), ('train.py:9', False)])
