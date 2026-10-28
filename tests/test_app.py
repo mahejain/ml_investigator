@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import app
 import export_mlflow_run
+import evaluate_agent
 
 def archive(entries):
     buf=io.BytesIO()
@@ -11,8 +12,39 @@ def archive(entries):
     return buf.getvalue()
 
 class InvestigatorTests(unittest.TestCase):
+    def test_demo_access_password(self):
+        with patch.dict(os.environ, {'DEMO_ACCESS_TOKEN':'test-demo-password-not-an-api-key'}, clear=True):
+            self.assertFalse(app.authorized_demo_request(''))
+            self.assertFalse(app.authorized_demo_request('wrong'))
+            self.assertTrue(app.authorized_demo_request('test-demo-password-not-an-api-key'))
+
+    def test_public_binding_requires_demo_password(self):
+        with patch.dict(os.environ, {'HOST':'0.0.0.0'}, clear=True):
+            with self.assertRaisesRegex(ValueError, 'DEMO_ACCESS_TOKEN'):
+                app.validate_server_configuration()
+        with patch.dict(os.environ, {'HOST':'127.0.0.1'}, clear=True):
+            app.validate_server_configuration()
+
+    def test_unauthorized_http_request_never_reaches_model(self):
+        with patch.dict(os.environ, {'DEMO_ACCESS_TOKEN':'test-demo-password-not-an-api-key'}, clear=True), patch.object(app, 'investigate') as investigate:
+            server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
+            worker=threading.Thread(target=server.serve_forever,daemon=True); worker.start()
+            try:
+                request=urllib.request.Request(f'http://127.0.0.1:{server.server_port}/investigate',b'{}',{'Content-Type':'application/json'})
+                with self.assertRaises(urllib.error.HTTPError) as error: urllib.request.urlopen(request)
+                self.assertEqual(error.exception.code,401)
+                error.exception.close()
+                investigate.assert_not_called()
+            finally:
+                server.shutdown(); worker.join(); server.server_close()
+
+    def test_evaluation_case_ids_are_distinct_and_reviewable(self):
+        cases = evaluate_agent.CASES
+        self.assertEqual(len(cases), 9)
+        self.assertEqual(len({case['id'] for case in cases}), len(cases))
+        self.assertTrue(all(case['files'] and case['question'] and case['review'] for case in cases))
     def test_http_sample_and_daily_cap(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'NEBIUS_API_KEY':'dummy','RATE_LIMIT_DB':os.path.join(directory,'limits.db'),'DAILY_REQUEST_LIMIT':'1','DAILY_IP_LIMIT':'1'}, clear=True), patch.object(app, 'call_model', return_value={'choices':[{'message':{'content':'Observation (run.log:1)'}}]}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'DEMO_ACCESS_TOKEN':'test-demo-password-not-an-api-key','NEBIUS_API_KEY':'dummy','RATE_LIMIT_DB':os.path.join(directory,'limits.db'),'DAILY_REQUEST_LIMIT':'1','DAILY_IP_LIMIT':'1'}, clear=True), patch.object(app, 'call_model', return_value={'choices':[{'message':{'content':'Observation (run.log:1)'}}]}):
             server = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
             worker = threading.Thread(target=server.serve_forever, daemon=True)
             worker.start()
@@ -21,7 +53,7 @@ class InvestigatorTests(unittest.TestCase):
                 with urllib.request.urlopen(base + '/sample_project.zip') as response:
                     self.assertEqual(response.headers.get_content_type(), 'application/zip')
                 body = json.dumps({'zip':base64.b64encode(archive({'run.log':'validation_accuracy: 0.8'})).decode(), 'question':'Why?'}).encode()
-                request = lambda: urllib.request.Request(base+'/investigate', body, {'Content-Type':'application/json'})
+                request = lambda: urllib.request.Request(base+'/investigate', body, {'Content-Type':'application/json', 'X-Demo-Token':'test-demo-password-not-an-api-key'})
                 with urllib.request.urlopen(request()) as response:
                     self.assertEqual(json.load(response)['answer'], 'Observation (run.log:1)')
                 with self.assertRaises(urllib.error.HTTPError) as error:
@@ -122,6 +154,23 @@ class InvestigatorTests(unittest.TestCase):
         audit = app.audit_citations('run.json:3 and run.json:1-2', files, {('run.json', n) for n in (1, 2, 3)})
         self.assertTrue(audit['references'][0]['structural_only'])
         self.assertFalse(audit['references'][1]['structural_only'])
+
+    def test_numeric_warnings_do_not_claim_derived_values_are_wrong(self):
+        files = [{'name':'run.log','content':'train_accuracy: 0.502222\nvalidation_accuracy: 0.84'}]
+        presented = {('run.log', 1), ('run.log', 2)}
+        warnings = app.audit_numeric_claims('Training accuracy was 0.502 (run.log:1).\nThere were 120 samples (run.log:2).', files, presented)
+        self.assertEqual(warnings, [{'reference':'run.log:2', 'numbers':['120']}])
+
+    def test_numeric_warnings_skip_unsent_or_ambiguous_citations(self):
+        files = [{'name':'run.log','content':'train_accuracy: 0.5\nvalidation_accuracy: 0.8'}]
+        self.assertEqual(app.audit_numeric_claims('Value was 99 (run.log:2).', files, {('run.log',1)}), [])
+        self.assertEqual(app.audit_numeric_claims('Values were 99 (run.log:1, 2).', files, {('run.log',1),('run.log',2)}), [])
+
+    def test_numeric_grouping_and_derived_gap(self):
+        files=[{'name':'train.py','content':'scale = 10000'}, {'name':'run.json','content':'train_accuracy: 0.89\nvalidation_accuracy: 0.84'}]
+        presented={('train.py',1),('run.json',1),('run.json',2)}
+        self.assertEqual(app.audit_numeric_claims('Scale reaches 10\u202f000 (train.py:1).',files,presented),[])
+        self.assertEqual(app.audit_numeric_claims('Gap approximately −0.05 (run.json:1-2).',files,presented),[])
 
     def test_model_truncation_is_reported(self):
         files=[{'name':'run.log','content':'train_accuracy: 0.8'}]

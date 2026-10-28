@@ -1,4 +1,4 @@
-import base64, io, json, os, re, urllib.request, urllib.parse, zipfile, sqlite3, datetime, math, threading, logging
+import base64, io, json, os, re, urllib.request, urllib.parse, zipfile, sqlite3, datetime, math, threading, logging, hmac
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import PurePosixPath, Path
@@ -7,6 +7,21 @@ ROOT = Path(__file__).parent
 MODEL = os.environ.get('NEBIUS_MODEL', 'nvidia/nemotron-3-super-120b-a12b')
 logger = logging.getLogger('investigator')
 request_slots = threading.BoundedSemaphore(int(os.environ.get('MAX_CONCURRENT_INVESTIGATIONS', '2')))
+
+def authorized_demo_request(provided):
+    required = os.environ.get('DEMO_ACCESS_TOKEN', '')
+    return not required or hmac.compare_digest(provided.encode('utf-8'), required.encode('utf-8'))
+
+def validate_server_configuration():
+    host = os.environ.get('HOST', '127.0.0.1')
+    if host not in ('127.0.0.1', 'localhost', '::1') and len(os.environ.get('DEMO_ACCESS_TOKEN', '')) < 24:
+        raise ValueError('Public binding requires a DEMO_ACCESS_TOKEN of at least 24 characters. Set it privately in your hosting environment.')
+
+def normalize_numbers(text):
+    text = text.replace('−', '-')
+    # Convert grouped thousands without joining ordinary space-separated numbers.
+    return re.sub(r'(?<![\w.])\d{1,3}(?:[ ,\u00a0\u202f\u2009]\d{3})+(?!\d)',
+                  lambda m: re.sub(r'[ ,\u00a0\u202f\u2009]', '', m.group()), text)
 
 def reserve_request(ip, database=None):
     """Atomically reserve one daily request in a shared SQLite database."""
@@ -116,6 +131,38 @@ def audit_citations(answer, files, presented=None):
             structural_only = exists and all(not re.search(r'[\w]', line, re.UNICODE) for line in lines_by_name[name][start-1:end])
             checks.append({'reference':label, 'exists':exists, 'presented':sent, 'structural_only':structural_only})
     return {'references':checks, 'note':'Checks whether cited lines were sent to the model and flags blank or punctuation-only citations. It does not establish whether a citation supports a claim.'}
+
+def audit_numeric_claims(answer, files, presented):
+    """Flag numbers not directly visible in a single cited span; not a truth test."""
+    source = {f['name']: f['content'].splitlines() for f in files}
+    citation = re.compile(r'(?<![\w/])([\w./-]+\.(?:py|json|log|txt|csv|ya?ml|md)):(\d+)(?:\s*[-–—‑]\s*(\d+))?', re.I)
+    number = re.compile(r'(?<![\w.])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w.])')
+    checks = []
+    for line in answer.splitlines():
+        refs = list(citation.finditer(line))
+        if len(refs) != 1 or ',' in line[refs[0].end():].split(')', 1)[0]: continue
+        ref = refs[0]; name = ref.group(1); start = int(ref.group(2)); end = int(ref.group(3) or start)
+        if name not in source or not (1 <= start <= end <= len(source[name])): continue
+        if not all((name, n) in presented for n in range(start, end + 1)): continue
+        claim = normalize_numbers(line[:ref.start()])
+        # Derived quantities need a calculation checker, not literal matching.
+        if re.search(r'\b(?:derived|gap|difference|percentage points)\b', claim, re.I): continue
+        observed = list(number.finditer(claim))
+        if not observed: continue
+        evidence_values = [float(m.group()) for m in number.finditer(normalize_numbers('\n'.join(source[name][start-1:end])))]
+        missing = []
+        for token in observed:
+            text = token.group(); value = float(text)
+            decimals = len(text.split('.', 1)[1].split('e')[0].split('E')[0]) if '.' in text else 0
+            tolerance = 0.5 * 10 ** (-decimals) if decimals else 1e-9
+            percent = bool(re.match(r'\s*%', claim[token.end():]))
+            wanted = value / 100 if percent else value
+            tol = tolerance / 100 if percent else tolerance
+            if not any(math.isclose(wanted, x, rel_tol=1e-9, abs_tol=tol) or (percent and math.isclose(value, x, rel_tol=1e-9, abs_tol=tolerance)) for x in evidence_values):
+                missing.append(text + ('%' if percent else ''))
+        if missing:
+            checks.append({'reference':f'{name}:{start}' + (f'-{end}' if end != start else ''), 'numbers':missing})
+    return checks[:35]
 
 def build_evidence(files, limit=100000):
     """Include complete lines only, and retain their exact locations for auditing."""
@@ -251,15 +298,26 @@ def investigate(files, question):
     incomplete = choice.get('finish_reason') == 'length'
     audit = audit_citations(text, files, presented)
     record_run(files, refs, audit)
-    return {'answer':text, 'metrics':refs, 'findings':findings, 'sources':sources, 'search_query':query, 'warning':warning, 'files':[f['name'] for f in files], 'citation_audit':audit, 'incomplete':incomplete, 'model':MODEL, 'usage':answer.get('usage',{})}
+    numeric_warnings = audit_numeric_claims(text, files, presented)
+    return {'answer':text, 'metrics':refs, 'findings':findings, 'sources':sources, 'search_query':query, 'warning':warning, 'files':[f['name'] for f in files], 'citation_audit':audit, 'numeric_warnings':numeric_warnings, 'incomplete':incomplete, 'model':MODEL, 'usage':answer.get('usage',{})}
 
 class Handler(BaseHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
+
     def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(b'{"status":"ok"}'); return
         if self.path not in ('/', '/sample_project.zip'): self.send_error(404); return
         sample = self.path == '/sample_project.zip'
         data=(ROOT/('sample_project.zip' if sample else 'index.html')).read_bytes(); self.send_response(200); self.send_header('Content-Type','application/zip' if sample else 'text/html; charset=utf-8'); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
         if self.path != '/investigate': self.send_error(404); return
+        if not authorized_demo_request(self.headers.get('X-Demo-Token', '')):
+            self.send_response(401); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(b'{"error":"Enter the demo access password provided in the testing instructions."}'); return
         if not request_slots.acquire(blocking=False):
             self.send_response(503); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(b'{"error":"Server busy, please try again later."}'); return
         try:
@@ -280,4 +338,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+    validate_server_configuration()
     print('Open http://127.0.0.1:8000'); ThreadingHTTPServer((os.environ.get('HOST','127.0.0.1'),int(os.environ.get('PORT','8000'))),Handler).serve_forever()

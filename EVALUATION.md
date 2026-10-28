@@ -15,5 +15,9 @@ These labels describe expected observable evidence, not verified root causes. Th
 | `generalization_gap` | `run.log:1-2` reports 0.96 train and 0.70 validation accuracy | The gap proves overfitting or identifies its cause |
 | `no_metrics` | No supported metric or error is supplied | The outcome or failure cause is known |
 | `scaling_hypothesis` | Scaling is not shown in the excerpt; `run.log:1-2` reports 0.55 and 0.53 | Scaling is absent from the whole run or must improve it |
+| `single_validation_only` | `run.log:1` reports validation accuracy 0.72 | A single validation result proves overfitting |
+| `large_gap_uncertain` | `run.log:1-2` reports train 0.99 and validation 0.61 | The gap proves leakage |
+| `mixed_metric_types` | `run.log:1-2` reports training accuracy 0.91 and validation F1 0.48 | Their difference is an accuracy generalization gap |
+| `unknown_metric` | The provided file contains `val_auc: 0.73` | Failure or an invented accuracy, if the detector misses AUC |
 
 For each case record pass, needs improvement, or incorrect, plus exact unsupported claims and reviewer notes. This small checklist is not an aggregate accuracy benchmark or proof of human validation.

@@ -1,4 +1,4 @@
-"""Run five synthetic review cases against the current investigator."""
+"""Run synthetic review cases against the current investigator."""
 import csv
 import json
 from datetime import datetime, timezone
@@ -45,6 +45,30 @@ CASES = [
             {'name': 'run.log', 'content': 'train_accuracy: 0.55\nvalidation_accuracy: 0.53\n'},
         ],
         'review': 'Does it distinguish missing scaling in the excerpt from proof about the full run, and suggest a fair test without claiming scaling must help?',
+    },
+    {
+        'id': 'single_validation_only',
+        'question': 'Does the model overfit?',
+        'files': [{'name':'run.log', 'content':'validation_accuracy: 0.72\n'}],
+        'review': 'Does it acknowledge that a validation accuracy alone cannot establish overfitting and ask for training performance and a baseline?',
+    },
+    {
+        'id': 'large_gap_uncertain',
+        'question': 'Does this gap prove data leakage?',
+        'files': [{'name':'run.log', 'content':'train_accuracy: 0.99\nvalidation_accuracy: 0.61\n'}],
+        'review': 'Does it distinguish the observed gap from unproven leakage, mention alternative causes and propose a check?',
+    },
+    {
+        'id': 'mixed_metric_types',
+        'question': 'Are these scores directly comparable?',
+        'files': [{'name':'run.log', 'content':'train_accuracy: 0.91\nvalidation_f1: 0.48\n'}],
+        'review': 'Does it identify different metric types and avoid treating their numeric difference as a train-validation accuracy gap?',
+    },
+    {
+        'id': 'unknown_metric',
+        'question': 'Why is this performance bad?',
+        'files': [{'name':'metrics.log', 'content':'val_auc: 0.73\n'}],
+        'review': 'If AUC is not detected, does it ask for clarification without claiming the run failed or inventing an accuracy?',
     },
 ]
 

@@ -13,6 +13,7 @@ This is a local prototype for assisting investigation. Its answers can be wrong 
 - Retrieves relevant scikit-learn documentation using Tavily.
 - Sends the evidence and retrieved references to a Nemotron model for analysis.
 - Checks whether cited file lines exist and were included in the evidence sent to the model, and flags citations containing only blank or punctuation-only lines. This does **not** verify whether a claim is supported.
+- Flags some numbers not directly found in a single cited span for manual review. Derived or rounded values may be legitimate; the check can miss errors and cannot verify semantic support.
 - Requests a filename and line number for each observation; citations using other formats may not be detected and must be reviewed manually.
 - Asks for more evidence when it cannot detect a supported metric or error.
 - Does **not** execute uploaded code or extract the ZIP to disk.
@@ -145,7 +146,7 @@ Run the synthetic evaluation cases with your API keys set:
 python evaluate_agent.py
 ```
 
-The evaluation includes five cases, covering situations such as an error-only log, an F1 score, a generalization gap and missing evidence. Results and a review CSV are written to `evaluation_results/`.
+The evaluation includes nine synthetic cases, covering situations such as an error-only log, an F1 score, a generalization gap, mixed metrics and missing evidence. Results and a review CSV are written to `evaluation_results/`. Cases requiring a model response can incur API charges; review the script before running it.
 
 These cases are **review aids, not ground truth**. A completed request or `status=ok` does not mean that the model's answer is correct. The missing-evidence guard can respond without calling the model, so that case should not be counted as a model-quality comparison.
 
@@ -161,7 +162,7 @@ Run the local test suite:
 python -m unittest discover -s tests -v
 ```
 
-Twelve tests passed in a local run. The repository also includes a GitHub Actions workflow; check the **Actions** tab for the current status of the remote run.
+The test suite covers evidence handling, citation checks, demo access, request limits and mocked provider calls. Passing tests do not establish model answer quality or live hosting availability. Check the **Actions** tab for the current remote workflow status.
 
 ## Optional: LangSmith tracing
 
@@ -186,10 +187,10 @@ docker build -t ml-investigator .
 With `NEBIUS_API_KEY` and `TAVILY_API_KEY` set in your host environment, run:
 
 ```bash
-docker run --rm -p 127.0.0.1:8000:8000 -e NEBIUS_API_KEY -e TAVILY_API_KEY ml-investigator
+docker run --rm -p 127.0.0.1:8000:8000 -e NEBIUS_API_KEY -e TAVILY_API_KEY -e DEMO_ACCESS_TOKEN ml-investigator
 ```
 
-Docker operation has not yet been verified for this version. Binding to localhost keeps the example intended for local access; Docker alone does not make the application safe for public deployment.
+The container binds publicly internally, so generate and set a private `DEMO_ACCESS_TOKEN` of at least 24 characters before running the command above. The browser's Demo access field accepts this password. Docker operation has not yet been verified for this version; Docker alone does not establish production safety.
 
 ## Privacy, limitations and deployment
 
@@ -200,12 +201,18 @@ Docker operation has not yet been verified for this version. Binding to localhos
 - Retrieved documentation is treated as untrusted reference material. It describes general library behavior and is not proof of what happened in a particular run.
 - File and line checks confirm citation existence, not whether the cited text supports a claim.
 - The model can invent details, make incorrect technical claims or suggest experiments that need further scrutiny. Review its output.
-- The prototype includes basic daily request limits and a concurrency limit, but still lacks authentication, user isolation and other production protections. It is intended for trusted local use until deployment is reviewed.
+- The prototype includes a shared demo password, basic daily request limits and a concurrency limit. It lacks individual accounts, user isolation and broader production protections. A shared password is suitable only for a controlled demonstration and should not be treated as a complete security system.
 - There is currently no verified public deployment or judge-accessible link. Add suitable access and abuse controls before exposing the server publicly.
 
 The default model ID is `nvidia/nemotron-3-super-120b-a12b`. Set `NEBIUS_MODEL` to another model ID if needed for your account.
 
 Request limits use a local SQLite database and UTC calendar days. Configure `DAILY_REQUEST_LIMIT` (default 30), `DAILY_IP_LIMIT` (default 5), `MAX_CONCURRENT_INVESTIGATIONS` (default 2), and optionally `RATE_LIMIT_DB`. These controls do not guarantee an API spending cap. Instances with separate databases do not share a limit, and a reverse proxy may cause all users to share one IP address. Public deployments require shared persistent storage, trusted proxy configuration, provider-side budget limits, and a separate security review.
+
+### Demo access
+
+Local loopback use works without a password unless `DEMO_ACCESS_TOKEN` is set. Binding to other interfaces requires a token of at least 24 characters. Generate a fresh random value and set it privately in the server environment; never commit the token or put it in a URL. Enter it in the page's Demo access field. The browser keeps the value in the current page only and sends it in an HTTP header; use HTTPS for any remote demo. Never enter an API key in this field. Give judges the separate demo password through the submission's appropriate testing instructions after confirming who can see those instructions.
+
+See `DEPLOYMENT.md` for a Render setup and deployment checks. `/health` reports server availability only; it does not test API credentials or available credits.
 
 Nebius Sandboxes, Tavily Map/Crawl/Research, Toloka and Tendem are not integrated. Optional LangSmith tracing covers the Nemotron call; Tavily steps do not have separate traces.
 
